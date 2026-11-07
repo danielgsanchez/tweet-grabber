@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tweet Grabber</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <h1>File name</h1>
+
+    <label class="field">
+      Prefix
+      <input id="prefix" type="text" maxlength="60" />
+    </label>
+
+    <label class="check">
+      <input id="includeUsername" type="checkbox" />
+      Include username
+    </label>
+    <label class="check">
+      <input id="includeType" type="checkbox" />
+      Include IMG / VID
+    </label>
+
+    <fieldset>
+      <legend>Name</legend>
+      <label class="check">
+        <input type="radio" name="nameMode" value="file" />
+        File name on X
+      </label>
+      <label class="check">
+        <input type="radio" name="nameMode" value="post" />
+        Post number
+      </label>
+      <label class="check">
+        <input type="radio" name="nameMode" value="custom" />
+        Custom
+      </label>
+      <input id="customName" type="text" maxlength="100" aria-label="Custom name" />
+    </fieldset>
+
+    <label class="field">
+      Suffix
+      <input id="suffix" type="text" maxlength="60" />
+    </label>
+
+    <p class="preview-label">Preview</p>
+    <output id="preview"></output>
+    <p id="note" class="note" hidden>
+      With a custom name, repeated files get a number added: name (1).jpg
+    </p>
+
+    <button id="reset" type="button">Reset to defaults</button>
+
+    <script src="filename.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

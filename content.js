@@ -1,0 +1,251 @@
+(() => {
+  'use strict';
+
+  const MIN_MEDIA_SIZE = 100; // px: posts with four photos show them small
+  const BTN_SIZE = 36;
+  const BTN_MARGIN = 10;
+  const REFRESH_MS = 300;
+  // Photos and video thumbnails; avatars, banners and link previews live elsewhere.
+  const MEDIA_PATH =
+    /^\/(media|ext_tw_video_thumb|amplify_video_thumb|tweet_video_thumb)\//;
+  const NON_USER_PATHS = new Set([
+    'home', 'explore', 'notifications', 'messages', 'search', 'settings', 'i', 'compose',
+  ]);
+
+  // ---------- File name ----------
+
+  let settings = DEFAULT_SETTINGS;
+  chrome.storage.local.get(DEFAULT_SETTINGS).then((stored) => {
+    settings = stored;
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const updated = { ...settings };
+    for (const [key, change] of Object.entries(changes)) updated[key] = change.newValue;
+    settings = updated;
+  });
+
+  const urlPath = (url) => new URL(url, location.href).pathname;
+  const lastPathSegment = (url) => urlPath(url).split('/').pop() || '';
+  const mediaKey = (url) => urlPath(url).replace(/\.[^./]*$/, '');
+
+  function fileIdFromUrl(url) {
+    return lastPathSegment(url).replace(/\.[^.]*$/, '').replace(/[^\w-]/g, '');
+  }
+
+  function extensionFromUrl(url, fallback) {
+    const ext = lastPathSegment(url).match(/\.([a-z0-9]{2,5})$/i)?.[1];
+    return ext ? ext.toLowerCase() : fallback;
+  }
+
+  function buildFilename({ username, tweetId, index, count }, url, isVideo) {
+    const fileId = fileIdFromUrl(url) || String(Date.now());
+    const postId = tweetId && count > 1 ? `${tweetId}_${index}` : tweetId;
+    const ext = isVideo ? 'mp4' : extensionFromUrl(url, 'jpg');
+    return composeFilename(settings, { username: username || 'x', fileId, postId, isVideo, ext });
+  }
+
+  // ---------- Data read from X's responses by page-hook.js ----------
+
+  const mediaByKey = new Map();
+
+  addEventListener('message', (e) => {
+    if (e.source !== window || e.data?.source !== 'tg-media') return;
+    for (const item of e.data.media) mediaByKey.set(item.key, item);
+  });
+
+  // ---------- Finding what's on screen ----------
+
+  function thumbnailOf(el) {
+    const url = el.tagName === 'VIDEO' ? el.poster : el.currentSrc || el.src;
+    if (!url) return null;
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname === 'pbs.twimg.com' && MEDIA_PATH.test(parsed.pathname) ? url : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isMedia(el) {
+    if (el.tagName !== 'IMG' && el.tagName !== 'VIDEO') return false;
+    const r = el.getBoundingClientRect();
+    if (r.width < MIN_MEDIA_SIZE || r.height < MIN_MEDIA_SIZE) return false;
+    // GIFs play straight from video.twimg.com and may have no thumbnail.
+    return Boolean(thumbnailOf(el) || (el.tagName === 'VIDEO' && el.src.startsWith('https:')));
+  }
+
+  function visiblePart(el) {
+    const r = el.getBoundingClientRect();
+    const left = Math.max(r.left, 0);
+    const right = Math.min(r.right, innerWidth);
+    const top = Math.max(r.top, 0);
+    const bottom = Math.min(r.bottom, innerHeight);
+    return right > left && bottom > top ? { left, right, top, bottom } : null;
+  }
+
+  // X covers media with transparent layers, so we check everything under the point.
+  function mediaAt(x, y) {
+    const stack = document
+      .elementsFromPoint(x, y)
+      .filter((el) => !el.classList.contains('tg-btn'));
+
+    const media = stack.find(isMedia);
+    if (!media) return null;
+    // Menus and pop-ups open in #layers, on top of the timeline.
+    const layer = stack[0]?.closest?.('#layers');
+    if (layer && !layer.contains(media)) return null;
+    // While a video loads, its still image sits on top: the video is what counts.
+    return stack.find((el) => el.tagName === 'VIDEO' && isMedia(el)) || media;
+  }
+
+  // ---------- Downloads ----------
+
+  // Used when X's data for a photo hasn't been seen: the author comes from the post's link.
+  function postFromPage(el) {
+    const article = el.closest('article');
+    const links = article
+      ? [...article.querySelectorAll('a[href*="/status/"]')]
+      : [];
+    const permalink = links.find((link) => link.querySelector('time')) || links[0];
+    const path = permalink ? urlPath(permalink.href) : location.pathname;
+    const match = path.match(/^\/([^/]+)\/status\/(\d+)/);
+    if (match) return { username: match[1], tweetId: match[2], index: 1, count: 1 };
+    const user = path.split('/')[1];
+    return { username: user && !NON_USER_PATHS.has(user) ? user : null, tweetId: null };
+  }
+
+  // Photos are shown resized; name=orig asks for the uploaded original.
+  function originalPhotoUrl(url) {
+    const parsed = new URL(url);
+    const ext = parsed.pathname.match(/\.(\w+)$/)?.[1];
+    const format = parsed.searchParams.get('format') || ext || 'jpg';
+    parsed.pathname = parsed.pathname.replace(/\.\w+$/, '');
+    parsed.search = `?format=${format}&name=orig`;
+    return { url: parsed.href, ext: format };
+  }
+
+  async function downloadMedia(el) {
+    const thumbnail = thumbnailOf(el);
+    const item = thumbnail && mediaByKey.get(mediaKey(thumbnail));
+    const post = item || postFromPage(el);
+
+    if (item?.videoUrl) {
+      await sendDownload(item.videoUrl, buildFilename(post, item.videoUrl, true));
+      return;
+    }
+    if (el.tagName === 'VIDEO' && el.src.startsWith('https:')) {
+      await sendDownload(el.src, buildFilename(post, el.src, true));
+      return;
+    }
+    const isPhoto = thumbnail && urlPath(thumbnail).startsWith('/media/');
+    if (!isPhoto) throw new Error('No data for this video yet: reload the page and try again');
+
+    const { url, ext } = originalPhotoUrl(item?.imageUrl || thumbnail);
+    const filename = buildFilename(post, `${urlPath(url)}.${ext}`, false);
+    await sendDownload(url, filename);
+  }
+
+  async function sendDownload(url, filename) {
+    let res;
+    try {
+      res = await chrome.runtime.sendMessage({ type: 'download', url, filename });
+    } catch {
+      throw new Error('The extension was updated: reload the page');
+    }
+    if (!res?.ok) throw new Error(res?.error || 'Download failed');
+    toast(`Downloading ${filename}`);
+  }
+
+  let toastTimer;
+  function toast(text) {
+    let el = document.getElementById('tg-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tg-toast';
+      document.documentElement.append(el);
+    }
+    el.textContent = text;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.remove(), 3000);
+  }
+
+  // ---------- Button ----------
+
+  async function handleClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    if (btn.dataset.busy === 'true') return;
+    btn.dataset.busy = 'true';
+    try {
+      // Looked up now rather than when placing the button: the page may have moved.
+      const r = btn.getBoundingClientRect();
+      const media = mediaAt(r.left + r.width / 2, r.top + r.height / 2);
+      if (!media) throw new Error('Could not find the photo or video');
+      await downloadMedia(media);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      btn.dataset.busy = 'false';
+    }
+  }
+
+  let button = null;
+
+  function placeButton(left, top) {
+    if (!button) {
+      button = document.createElement('button');
+      button.className = 'tg-btn';
+      button.type = 'button';
+      button.title = 'Download';
+      button.innerHTML =
+        '<svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>';
+      button.addEventListener('click', handleClick);
+      document.documentElement.append(button);
+    }
+    button.style.left = `${Math.max(0, Math.min(left, innerWidth - BTN_SIZE))}px`;
+    button.style.top = `${Math.max(0, Math.min(top, innerHeight - BTN_SIZE))}px`;
+    button.style.display = 'flex';
+  }
+
+  let pointer = null;
+
+  function refreshButton() {
+    const media = pointer && mediaAt(pointer.x, pointer.y);
+    const part = media && visiblePart(media);
+    if (part) {
+      // Top center: the video controls are at the bottom.
+      placeButton((part.left + part.right - BTN_SIZE) / 2, part.top + BTN_MARGIN);
+    } else if (button) {
+      button.style.display = 'none';
+    }
+  }
+
+  let framePending = false;
+  function scheduleRefresh() {
+    if (framePending) return;
+    framePending = true;
+    requestAnimationFrame(() => {
+      framePending = false;
+      refreshButton();
+    });
+  }
+
+  document.addEventListener(
+    'mousemove',
+    (e) => {
+      pointer = { x: e.clientX, y: e.clientY };
+      scheduleRefresh();
+    },
+    { passive: true },
+  );
+  document.addEventListener('mouseleave', () => {
+    pointer = null;
+    scheduleRefresh();
+  });
+  addEventListener('scroll', scheduleRefresh, { passive: true, capture: true });
+  addEventListener('resize', scheduleRefresh, { passive: true });
+  // X swaps thumbnails for videos without notice, so we also re-check often.
+  setInterval(refreshButton, REFRESH_MS);
+})();

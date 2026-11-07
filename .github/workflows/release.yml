@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Keep line endings as stored in the repository
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+
+      - name: Check that the userscript is up to date
+        shell: bash
+        run: |
+          sh userscript/build.sh
+          if ! git diff --quiet -- tweet-grabber.user.js; then
+            echo '::error::tweet-grabber.user.js is out of date. Run userscript/build.sh and commit the result.'
+            exit 1
+          fi
+
+      - name: Check that the extension can be packaged
+        shell: pwsh
+        run: ./scripts/package-extension.ps1
+
+  release:
+    needs: check
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Keep line endings as stored in the repository
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+
+      - name: Create a release if the version is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content manifest.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+          if (git ls-remote --tags origin "refs/tags/$tag") {
+            Write-Output "$tag already exists, nothing to release."
+            exit 0
+          }
+          .\scripts\package-extension.ps1
+          $notes = 'Download tweet-grabber.zip, unzip it, then use Load unpacked in chrome://extensions with Developer mode on. Keep the folder: Chrome loads the extension from it.'
+          gh release create $tag dist/tweet-grabber.zip --target $env:GITHUB_SHA --title "Tweet Grabber $version" --notes $notes --generate-notes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
