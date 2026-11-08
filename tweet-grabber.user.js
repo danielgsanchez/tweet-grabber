@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Grabber
 // @namespace    https://github.com/danielgsanchez/tweet-grabber
-// @version      0.2.0
+// @version      0.2.1
 // @description  Download photos, videos and GIFs from X (Twitter) in their best quality, copy links to them, and copy post links without tracking.
 // @author       danielgsanchez
 // @license      MIT
@@ -195,8 +195,7 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     } catch {
       return;
     }
-    const media = findMedia(data);
-    if (media.length) window.postMessage({ source: 'tg-media', media }, location.origin);
+    harvestData(data);
   }
 
   // ---------- Links without tracking ----------
@@ -253,17 +252,31 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
 
   // ---------- Reading X's responses ----------
 
+  // Only X's API carries post data. Everything else, video segments included, is left
+  // alone so it isn't copied and decoded for nothing.
+  const isApiUrl = (url) => /\/i\/api\/|\/graphql\//.test(url);
+
+  function harvestData(data) {
+    const media = findMedia(data);
+    if (media.length) window.postMessage({ source: 'tg-media', media }, location.origin);
+  }
+
   const originalFetch = window.fetch;
   window.fetch = async function (...args) {
     const response = await originalFetch.apply(this, args);
-    response.clone().text().then(harvest).catch(() => {});
+    const type = response.headers.get('content-type') || '';
+    if (isApiUrl(response.url) && type.includes('json')) {
+      response.clone().text().then(harvest).catch(() => {});
+    }
     return response;
   };
 
   const originalSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (...args) {
     this.addEventListener('load', () => {
+      if (!isApiUrl(this.responseURL)) return;
       if (this.responseType === '' || this.responseType === 'text') harvest(this.responseText);
+      else if (this.responseType === 'json') harvestData(this.response);
     });
     return originalSend.apply(this, args);
   };
@@ -283,6 +296,7 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
   const BTN_MARGIN = 10;
   const BTN_GAP = 14;
   const REFRESH_MS = 300;
+  const SCROLL_SETTLE_MS = 150;
   // Photos and video thumbnails; avatars, banners and link previews live elsewhere.
   const MEDIA_PATH =
     /^\/(media|ext_tw_video_thumb|amplify_video_thumb|tweet_video_thumb)\//;
@@ -326,11 +340,20 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
   // ---------- Data read from X's responses by page-hook.js ----------
 
   const mediaByKey = new Map();
+  const MAX_REMEMBERED = 3000; // keeps memory flat in long sessions
 
   addEventListener('message', (e) => {
     if (e.source !== window) return;
     if (e.data?.source === 'tg-media') {
-      for (const item of e.data.media) mediaByKey.set(item.key, item);
+      for (const item of e.data.media) {
+        mediaByKey.delete(item.key); // so it counts as the newest
+        mediaByKey.set(item.key, item);
+      }
+      // Maps keep insertion order, so the first keys are the oldest.
+      for (const key of mediaByKey.keys()) {
+        if (mediaByKey.size <= MAX_REMEMBERED) break;
+        mediaByKey.delete(key);
+      }
     } else if (e.data?.source === 'tg-link-cleaned') {
       toast('Link copied without tracking');
     }
@@ -544,9 +567,22 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     if (part) {
       // Top center: the video controls are at the bottom.
       placeBar((part.left + part.right - BAR_WIDTH) / 2, part.top + BTN_MARGIN);
-    } else if (bar) {
-      bar.style.display = 'none';
+    } else {
+      hideBar();
     }
+    // X swaps thumbnails for videos without notice, so while the buttons are shown we
+    // also re-check now and then. Otherwise nothing runs until the mouse moves.
+    if (part && !watchTimer) watchTimer = setInterval(refreshButton, REFRESH_MS);
+    if (!part && watchTimer) {
+      clearInterval(watchTimer);
+      watchTimer = null;
+    }
+  }
+
+  let watchTimer = null;
+
+  function hideBar() {
+    if (bar) bar.style.display = 'none';
   }
 
   let framePending = false;
@@ -559,11 +595,24 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     });
   }
 
+  // While scrolling, the buttons are hidden and the page isn't inspected: that would make
+  // the browser recalculate the layout on every frame. They come back once it stops.
+  let scrollTimer = null;
+  function onScroll() {
+    hideBar();
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      scrollTimer = null;
+      scheduleRefresh();
+    }, SCROLL_SETTLE_MS);
+  }
+
   document.addEventListener(
     'mousemove',
     (e) => {
+      if (pointer && pointer.x === e.clientX && pointer.y === e.clientY) return;
       pointer = { x: e.clientX, y: e.clientY };
-      scheduleRefresh();
+      if (!scrollTimer) scheduleRefresh();
     },
     { passive: true },
   );
@@ -571,10 +620,8 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     pointer = null;
     scheduleRefresh();
   });
-  addEventListener('scroll', scheduleRefresh, { passive: true, capture: true });
+  addEventListener('scroll', onScroll, { passive: true, capture: true });
   addEventListener('resize', scheduleRefresh, { passive: true });
-  // X swaps thumbnails for videos without notice, so we also re-check often.
-  setInterval(refreshButton, REFRESH_MS);
 })();
 
   })(unsafeWindow);

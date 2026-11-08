@@ -68,8 +68,7 @@
     } catch {
       return;
     }
-    const media = findMedia(data);
-    if (media.length) window.postMessage({ source: 'tg-media', media }, location.origin);
+    harvestData(data);
   }
 
   // ---------- Links without tracking ----------
@@ -126,17 +125,31 @@
 
   // ---------- Reading X's responses ----------
 
+  // Only X's API carries post data. Everything else, video segments included, is left
+  // alone so it isn't copied and decoded for nothing.
+  const isApiUrl = (url) => /\/i\/api\/|\/graphql\//.test(url);
+
+  function harvestData(data) {
+    const media = findMedia(data);
+    if (media.length) window.postMessage({ source: 'tg-media', media }, location.origin);
+  }
+
   const originalFetch = window.fetch;
   window.fetch = async function (...args) {
     const response = await originalFetch.apply(this, args);
-    response.clone().text().then(harvest).catch(() => {});
+    const type = response.headers.get('content-type') || '';
+    if (isApiUrl(response.url) && type.includes('json')) {
+      response.clone().text().then(harvest).catch(() => {});
+    }
     return response;
   };
 
   const originalSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (...args) {
     this.addEventListener('load', () => {
+      if (!isApiUrl(this.responseURL)) return;
       if (this.responseType === '' || this.responseType === 'text') harvest(this.responseText);
+      else if (this.responseType === 'json') harvestData(this.response);
     });
     return originalSend.apply(this, args);
   };

@@ -6,6 +6,7 @@
   const BTN_MARGIN = 10;
   const BTN_GAP = 14;
   const REFRESH_MS = 300;
+  const SCROLL_SETTLE_MS = 150;
   // Photos and video thumbnails; avatars, banners and link previews live elsewhere.
   const MEDIA_PATH =
     /^\/(media|ext_tw_video_thumb|amplify_video_thumb|tweet_video_thumb)\//;
@@ -49,11 +50,20 @@
   // ---------- Data read from X's responses by page-hook.js ----------
 
   const mediaByKey = new Map();
+  const MAX_REMEMBERED = 3000; // keeps memory flat in long sessions
 
   addEventListener('message', (e) => {
     if (e.source !== window) return;
     if (e.data?.source === 'tg-media') {
-      for (const item of e.data.media) mediaByKey.set(item.key, item);
+      for (const item of e.data.media) {
+        mediaByKey.delete(item.key); // so it counts as the newest
+        mediaByKey.set(item.key, item);
+      }
+      // Maps keep insertion order, so the first keys are the oldest.
+      for (const key of mediaByKey.keys()) {
+        if (mediaByKey.size <= MAX_REMEMBERED) break;
+        mediaByKey.delete(key);
+      }
     } else if (e.data?.source === 'tg-link-cleaned') {
       toast('Link copied without tracking');
     }
@@ -267,9 +277,22 @@
     if (part) {
       // Top center: the video controls are at the bottom.
       placeBar((part.left + part.right - BAR_WIDTH) / 2, part.top + BTN_MARGIN);
-    } else if (bar) {
-      bar.style.display = 'none';
+    } else {
+      hideBar();
     }
+    // X swaps thumbnails for videos without notice, so while the buttons are shown we
+    // also re-check now and then. Otherwise nothing runs until the mouse moves.
+    if (part && !watchTimer) watchTimer = setInterval(refreshButton, REFRESH_MS);
+    if (!part && watchTimer) {
+      clearInterval(watchTimer);
+      watchTimer = null;
+    }
+  }
+
+  let watchTimer = null;
+
+  function hideBar() {
+    if (bar) bar.style.display = 'none';
   }
 
   let framePending = false;
@@ -282,11 +305,24 @@
     });
   }
 
+  // While scrolling, the buttons are hidden and the page isn't inspected: that would make
+  // the browser recalculate the layout on every frame. They come back once it stops.
+  let scrollTimer = null;
+  function onScroll() {
+    hideBar();
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      scrollTimer = null;
+      scheduleRefresh();
+    }, SCROLL_SETTLE_MS);
+  }
+
   document.addEventListener(
     'mousemove',
     (e) => {
+      if (pointer && pointer.x === e.clientX && pointer.y === e.clientY) return;
       pointer = { x: e.clientX, y: e.clientY };
-      scheduleRefresh();
+      if (!scrollTimer) scheduleRefresh();
     },
     { passive: true },
   );
@@ -294,8 +330,6 @@
     pointer = null;
     scheduleRefresh();
   });
-  addEventListener('scroll', scheduleRefresh, { passive: true, capture: true });
+  addEventListener('scroll', onScroll, { passive: true, capture: true });
   addEventListener('resize', scheduleRefresh, { passive: true });
-  // X swaps thumbnails for videos without notice, so we also re-check often.
-  setInterval(refreshButton, REFRESH_MS);
 })();

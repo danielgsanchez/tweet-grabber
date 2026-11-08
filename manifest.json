@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tweet Grabber",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Download photos, videos and GIFs from X (Twitter) in their best quality, copy links to them, and copy post links without tracking.",
   "icons": {
     "16": "icons/icon16.png",
