@@ -1,7 +1,12 @@
-.tg-btn {
+.tg-bar {
   position: fixed;
   z-index: 2147483647;
   display: none;
+  gap: 14px;
+}
+
+.tg-btn {
+  display: flex;
   width: 36px;
   height: 36px;
   padding: 0;

@@ -1,8 +1,10 @@
 # Tweet Grabber
 
-A small Chrome extension for saving photos, videos and GIFs from X (Twitter).
+A small Chrome extension for saving photos, videos and GIFs from X (Twitter), and for sharing links without tracking.
 
-- **Hover** over a photo, video or GIF and click the button at the top center. In a post with several photos, it saves the one under the pointer.
+- **Hover** over a photo, video or GIF and click the download button at the top center. In a post with several photos, it saves the one under the pointer.
+- **Copy a link to just the video or photo** with the button next to it. The link ends in `/video/1` or `/photo/1`, and pasted in a post on X it shows only that video or photo, as the old "Post video" option did.
+- **Links without tracking:** when you use "Copy link" in X's share menu, the extension removes the `s=`, `t=` and `a=` codes X adds to tell where the link came from and who shared it.
 - **Quality:** videos and GIFs are saved as the highest-quality MP4 X offers, and photos at their original size.
 - **File names:** by default, `username_IMGGxK3fVbWQAAr1Zq.jpg` for photos and `username_VID<name>.mp4` for videos, using the file's name on X. Click the extension's icon to change the prefix, suffix and name (file name, post number or custom), or to leave out the username or the IMG / VID tag.
 
@@ -37,7 +39,7 @@ Pushing a new version also updates the userscript for everyone, since script man
 
 ## How it works
 
-- `page-hook.js` reads the post data X's own page receives, because videos on the page are blob URLs that can't be downloaded directly. Each video is matched to its thumbnail.
+- `page-hook.js` reads the post data X's own page receives, because videos on the page are blob URLs that can't be downloaded directly. Each video is matched to its thumbnail. It also removes the tracking from the links X copies.
 - `content.js` places the button and works out which photo or video is under the pointer.
 - `background.js` saves the files using `chrome.downloads`.
 

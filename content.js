@@ -4,6 +4,7 @@
   const MIN_MEDIA_SIZE = 100; // px: posts with four photos show them small
   const BTN_SIZE = 36;
   const BTN_MARGIN = 10;
+  const BTN_GAP = 14;
   const REFRESH_MS = 300;
   // Photos and video thumbnails; avatars, banners and link previews live elsewhere.
   const MEDIA_PATH =
@@ -50,8 +51,12 @@
   const mediaByKey = new Map();
 
   addEventListener('message', (e) => {
-    if (e.source !== window || e.data?.source !== 'tg-media') return;
-    for (const item of e.data.media) mediaByKey.set(item.key, item);
+    if (e.source !== window) return;
+    if (e.data?.source === 'tg-media') {
+      for (const item of e.data.media) mediaByKey.set(item.key, item);
+    } else if (e.data?.source === 'tg-link-cleaned') {
+      toast('Link copied without tracking');
+    }
   });
 
   // ---------- Finding what's on screen ----------
@@ -88,7 +93,7 @@
   function mediaAt(x, y) {
     const stack = document
       .elementsFromPoint(x, y)
-      .filter((el) => !el.classList.contains('tg-btn'));
+      .filter((el) => !el.closest('.tg-bar'));
 
     const media = stack.find(isMedia);
     if (!media) return null;
@@ -146,6 +151,37 @@
     await sendDownload(url, filename);
   }
 
+  // The link X used to give with "Post video": pasted in a post, it shows only that item.
+  // N is the item's position in the post, counting photos and videos alike.
+  function mediaLink(el) {
+    const thumbnail = thumbnailOf(el);
+    const item = thumbnail && mediaByKey.get(mediaKey(thumbnail));
+    const isPhoto = thumbnail && urlPath(thumbnail).startsWith('/media/') && el.tagName !== 'VIDEO';
+
+    if (item?.tweetId) {
+      const username = item.username || postFromPage(el).username || 'i';
+      const kind = isPhoto ? 'photo' : 'video';
+      return `https://x.com/${username}/status/${item.tweetId}/${kind}/${item.index}`;
+    }
+    // Photos link to their own page, which is the same link.
+    const photoLink = isPhoto && el.closest('a[href*="/photo/"]');
+    if (photoLink) {
+      const path = urlPath(photoLink.href).match(/^\/[^/]+\/status\/\d+\/photo\/\d+/)?.[0];
+      if (path) return `https://x.com${path}`;
+    }
+    throw new Error('No data for this post yet: reload the page and try again');
+  }
+
+  async function copyMediaLink(el) {
+    const link = mediaLink(el);
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      throw new Error('Could not copy the link');
+    }
+    toast(`Copied ${link}`);
+  }
+
   async function sendDownload(url, filename) {
     let res;
     try {
@@ -170,43 +206,57 @@
     toastTimer = setTimeout(() => el.remove(), 3000);
   }
 
-  // ---------- Button ----------
+  // ---------- Buttons ----------
 
-  async function handleClick(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const btn = e.currentTarget;
-    if (btn.dataset.busy === 'true') return;
-    btn.dataset.busy = 'true';
-    try {
-      // Looked up now rather than when placing the button: the page may have moved.
-      const r = btn.getBoundingClientRect();
-      const media = mediaAt(r.left + r.width / 2, r.top + r.height / 2);
-      if (!media) throw new Error('Could not find the photo or video');
-      await downloadMedia(media);
-    } catch (err) {
-      toast(err.message);
-    } finally {
-      btn.dataset.busy = 'false';
-    }
+  const ICONS = {
+    download: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
+    link:
+      '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/>' +
+      '<path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>',
+  };
+
+  function makeButton(title, icon, action) {
+    const btn = document.createElement('button');
+    btn.className = 'tg-btn';
+    btn.type = 'button';
+    btn.title = title;
+    btn.innerHTML = `<svg viewBox="0 0 24 24">${icon}</svg>`;
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (btn.dataset.busy === 'true') return;
+      btn.dataset.busy = 'true';
+      try {
+        // Looked up now rather than when placing the buttons: the page may have moved.
+        const r = btn.getBoundingClientRect();
+        const media = mediaAt(r.left + r.width / 2, r.top + r.height / 2);
+        if (!media) throw new Error('Could not find the photo or video');
+        await action(media);
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.dataset.busy = 'false';
+      }
+    });
+    return btn;
   }
 
-  let button = null;
+  const BAR_WIDTH = BTN_SIZE * 2 + BTN_GAP;
+  let bar = null;
 
-  function placeButton(left, top) {
-    if (!button) {
-      button = document.createElement('button');
-      button.className = 'tg-btn';
-      button.type = 'button';
-      button.title = 'Download';
-      button.innerHTML =
-        '<svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>';
-      button.addEventListener('click', handleClick);
-      document.documentElement.append(button);
+  function placeBar(left, top) {
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'tg-bar';
+      bar.append(
+        makeButton('Download', ICONS.download, downloadMedia),
+        makeButton('Copy link to this photo or video', ICONS.link, copyMediaLink),
+      );
+      document.documentElement.append(bar);
     }
-    button.style.left = `${Math.max(0, Math.min(left, innerWidth - BTN_SIZE))}px`;
-    button.style.top = `${Math.max(0, Math.min(top, innerHeight - BTN_SIZE))}px`;
-    button.style.display = 'flex';
+    bar.style.left = `${Math.max(0, Math.min(left, innerWidth - BAR_WIDTH))}px`;
+    bar.style.top = `${Math.max(0, Math.min(top, innerHeight - BTN_SIZE))}px`;
+    bar.style.display = 'flex';
   }
 
   let pointer = null;
@@ -216,9 +266,9 @@
     const part = media && visiblePart(media);
     if (part) {
       // Top center: the video controls are at the bottom.
-      placeButton((part.left + part.right - BTN_SIZE) / 2, part.top + BTN_MARGIN);
-    } else if (button) {
-      button.style.display = 'none';
+      placeBar((part.left + part.right - BAR_WIDTH) / 2, part.top + BTN_MARGIN);
+    } else if (bar) {
+      bar.style.display = 'none';
     }
   }
 

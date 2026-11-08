@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tweet Grabber
 // @namespace    https://github.com/danielgsanchez/tweet-grabber
-// @version      0.1.0
-// @description  Download the photo, video or GIF you are viewing on X (Twitter) in its best quality.
+// @version      0.2.0
+// @description  Download photos, videos and GIFs from X (Twitter) in their best quality, copy links to them, and copy post links without tracking.
 // @author       danielgsanchez
 // @license      MIT
 // @homepageURL  https://github.com/danielgsanchez/tweet-grabber
@@ -127,7 +127,7 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
   ((window, XMLHttpRequest) => {
 // Runs inside the page itself (world: MAIN) so it can read the responses X receives.
 // Video URLs only appear there: on the page, the <video> is a segmented blob: that
-// cannot be downloaded.
+// cannot be downloaded. It also removes the tracking X adds to the links it copies.
 (() => {
   'use strict';
 
@@ -199,6 +199,60 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     if (media.length) window.postMessage({ source: 'tg-media', media }, location.origin);
   }
 
+  // ---------- Links without tracking ----------
+
+  // X adds ?s= (the device) and a= or t= (who shared it) to the post links it copies.
+  const TRACKING_PARAMS = ['s', 't', 'a'];
+  const X_LINK = /https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^\s"'<>]+/g;
+
+  function cleanLinks(text) {
+    if (typeof text !== 'string') return text;
+    let cleaned = false;
+    const result = text.replace(X_LINK, (link) => {
+      let url;
+      try {
+        url = new URL(link);
+      } catch {
+        return link;
+      }
+      if (!/\/status\/\d+/.test(url.pathname)) return link;
+      const before = url.href;
+      for (const param of TRACKING_PARAMS) url.searchParams.delete(param);
+      if (url.href === before) return link;
+      cleaned = true;
+      return url.href;
+    });
+    if (cleaned) window.postMessage({ source: 'tg-link-cleaned' }, location.origin);
+    return result;
+  }
+
+  // The share menu's "Copy link" selects the link on the page and copies the selection.
+  addEventListener(
+    'copy',
+    (e) => {
+      const selected = String(getSelection());
+      const cleaned = cleanLinks(selected);
+      if (cleaned === selected || !e.clipboardData) return;
+      e.clipboardData.setData('text/plain', cleaned);
+      e.preventDefault();
+    },
+    true,
+  );
+
+  // Other ways of copying it, in case X changes how it does it.
+  const originalSetData = DataTransfer.prototype.setData;
+  DataTransfer.prototype.setData = function (format, data) {
+    return originalSetData.call(this, format, cleanLinks(data));
+  };
+  if (window.Clipboard?.prototype.writeText) {
+    const originalWriteText = Clipboard.prototype.writeText;
+    Clipboard.prototype.writeText = function (text) {
+      return originalWriteText.call(this, cleanLinks(text));
+    };
+  }
+
+  // ---------- Reading X's responses ----------
+
   const originalFetch = window.fetch;
   window.fetch = async function (...args) {
     const response = await originalFetch.apply(this, args);
@@ -218,7 +272,7 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
   })(unsafeWindow, unsafeWindow.XMLHttpRequest);
 
   // ---------- content.js ----------
-  GM_addStyle(".tg-btn {\n  position: fixed;\n  z-index: 2147483647;\n  display: none;\n  width: 36px;\n  height: 36px;\n  padding: 0;\n  align-items: center;\n  justify-content: center;\n  border: 0;\n  border-radius: 50%;\n  background: rgba(0, 0, 0, 0.7);\n  color: #fff;\n  cursor: pointer;\n  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);\n}\n\n.tg-btn:hover {\n  background: #000;\n}\n\n.tg-btn[data-busy='true'] {\n  opacity: 0.5;\n  cursor: progress;\n}\n\n.tg-btn svg {\n  width: 20px;\n  height: 20px;\n  fill: none;\n  stroke: currentColor;\n  stroke-width: 2;\n  stroke-linecap: round;\n  stroke-linejoin: round;\n}\n\n#tg-toast {\n  position: fixed;\n  z-index: 2147483647;\n  bottom: 24px;\n  left: 50%;\n  transform: translateX(-50%);\n  max-width: 90vw;\n  padding: 10px 16px;\n  border-radius: 8px;\n  background: rgba(0, 0, 0, 0.85);\n  color: #fff;\n  font: 14px/1.4 system-ui, sans-serif;\n  pointer-events: none;\n}\n");
+  GM_addStyle(".tg-bar {\n  position: fixed;\n  z-index: 2147483647;\n  display: none;\n  gap: 14px;\n}\n\n.tg-btn {\n  display: flex;\n  width: 36px;\n  height: 36px;\n  padding: 0;\n  align-items: center;\n  justify-content: center;\n  border: 0;\n  border-radius: 50%;\n  background: rgba(0, 0, 0, 0.7);\n  color: #fff;\n  cursor: pointer;\n  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);\n}\n\n.tg-btn:hover {\n  background: #000;\n}\n\n.tg-btn[data-busy='true'] {\n  opacity: 0.5;\n  cursor: progress;\n}\n\n.tg-btn svg {\n  width: 20px;\n  height: 20px;\n  fill: none;\n  stroke: currentColor;\n  stroke-width: 2;\n  stroke-linecap: round;\n  stroke-linejoin: round;\n}\n\n#tg-toast {\n  position: fixed;\n  z-index: 2147483647;\n  bottom: 24px;\n  left: 50%;\n  transform: translateX(-50%);\n  max-width: 90vw;\n  padding: 10px 16px;\n  border-radius: 8px;\n  background: rgba(0, 0, 0, 0.85);\n  color: #fff;\n  font: 14px/1.4 system-ui, sans-serif;\n  pointer-events: none;\n}\n");
 
   ((window) => {
 (() => {
@@ -227,6 +281,7 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
   const MIN_MEDIA_SIZE = 100; // px: posts with four photos show them small
   const BTN_SIZE = 36;
   const BTN_MARGIN = 10;
+  const BTN_GAP = 14;
   const REFRESH_MS = 300;
   // Photos and video thumbnails; avatars, banners and link previews live elsewhere.
   const MEDIA_PATH =
@@ -273,8 +328,12 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
   const mediaByKey = new Map();
 
   addEventListener('message', (e) => {
-    if (e.source !== window || e.data?.source !== 'tg-media') return;
-    for (const item of e.data.media) mediaByKey.set(item.key, item);
+    if (e.source !== window) return;
+    if (e.data?.source === 'tg-media') {
+      for (const item of e.data.media) mediaByKey.set(item.key, item);
+    } else if (e.data?.source === 'tg-link-cleaned') {
+      toast('Link copied without tracking');
+    }
   });
 
   // ---------- Finding what's on screen ----------
@@ -311,7 +370,7 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
   function mediaAt(x, y) {
     const stack = document
       .elementsFromPoint(x, y)
-      .filter((el) => !el.classList.contains('tg-btn'));
+      .filter((el) => !el.closest('.tg-bar'));
 
     const media = stack.find(isMedia);
     if (!media) return null;
@@ -369,6 +428,37 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     await sendDownload(url, filename);
   }
 
+  // The link X used to give with "Post video": pasted in a post, it shows only that item.
+  // N is the item's position in the post, counting photos and videos alike.
+  function mediaLink(el) {
+    const thumbnail = thumbnailOf(el);
+    const item = thumbnail && mediaByKey.get(mediaKey(thumbnail));
+    const isPhoto = thumbnail && urlPath(thumbnail).startsWith('/media/') && el.tagName !== 'VIDEO';
+
+    if (item?.tweetId) {
+      const username = item.username || postFromPage(el).username || 'i';
+      const kind = isPhoto ? 'photo' : 'video';
+      return `https://x.com/${username}/status/${item.tweetId}/${kind}/${item.index}`;
+    }
+    // Photos link to their own page, which is the same link.
+    const photoLink = isPhoto && el.closest('a[href*="/photo/"]');
+    if (photoLink) {
+      const path = urlPath(photoLink.href).match(/^\/[^/]+\/status\/\d+\/photo\/\d+/)?.[0];
+      if (path) return `https://x.com${path}`;
+    }
+    throw new Error('No data for this post yet: reload the page and try again');
+  }
+
+  async function copyMediaLink(el) {
+    const link = mediaLink(el);
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      throw new Error('Could not copy the link');
+    }
+    toast(`Copied ${link}`);
+  }
+
   async function sendDownload(url, filename) {
     let res;
     try {
@@ -393,43 +483,57 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     toastTimer = setTimeout(() => el.remove(), 3000);
   }
 
-  // ---------- Button ----------
+  // ---------- Buttons ----------
 
-  async function handleClick(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const btn = e.currentTarget;
-    if (btn.dataset.busy === 'true') return;
-    btn.dataset.busy = 'true';
-    try {
-      // Looked up now rather than when placing the button: the page may have moved.
-      const r = btn.getBoundingClientRect();
-      const media = mediaAt(r.left + r.width / 2, r.top + r.height / 2);
-      if (!media) throw new Error('Could not find the photo or video');
-      await downloadMedia(media);
-    } catch (err) {
-      toast(err.message);
-    } finally {
-      btn.dataset.busy = 'false';
-    }
+  const ICONS = {
+    download: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
+    link:
+      '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/>' +
+      '<path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>',
+  };
+
+  function makeButton(title, icon, action) {
+    const btn = document.createElement('button');
+    btn.className = 'tg-btn';
+    btn.type = 'button';
+    btn.title = title;
+    btn.innerHTML = `<svg viewBox="0 0 24 24">${icon}</svg>`;
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (btn.dataset.busy === 'true') return;
+      btn.dataset.busy = 'true';
+      try {
+        // Looked up now rather than when placing the buttons: the page may have moved.
+        const r = btn.getBoundingClientRect();
+        const media = mediaAt(r.left + r.width / 2, r.top + r.height / 2);
+        if (!media) throw new Error('Could not find the photo or video');
+        await action(media);
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.dataset.busy = 'false';
+      }
+    });
+    return btn;
   }
 
-  let button = null;
+  const BAR_WIDTH = BTN_SIZE * 2 + BTN_GAP;
+  let bar = null;
 
-  function placeButton(left, top) {
-    if (!button) {
-      button = document.createElement('button');
-      button.className = 'tg-btn';
-      button.type = 'button';
-      button.title = 'Download';
-      button.innerHTML =
-        '<svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>';
-      button.addEventListener('click', handleClick);
-      document.documentElement.append(button);
+  function placeBar(left, top) {
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'tg-bar';
+      bar.append(
+        makeButton('Download', ICONS.download, downloadMedia),
+        makeButton('Copy link to this photo or video', ICONS.link, copyMediaLink),
+      );
+      document.documentElement.append(bar);
     }
-    button.style.left = `${Math.max(0, Math.min(left, innerWidth - BTN_SIZE))}px`;
-    button.style.top = `${Math.max(0, Math.min(top, innerHeight - BTN_SIZE))}px`;
-    button.style.display = 'flex';
+    bar.style.left = `${Math.max(0, Math.min(left, innerWidth - BAR_WIDTH))}px`;
+    bar.style.top = `${Math.max(0, Math.min(top, innerHeight - BTN_SIZE))}px`;
+    bar.style.display = 'flex';
   }
 
   let pointer = null;
@@ -439,9 +543,9 @@ function composeFilename(settings, { username, fileId, postId, isVideo, ext }) {
     const part = media && visiblePart(media);
     if (part) {
       // Top center: the video controls are at the bottom.
-      placeButton((part.left + part.right - BTN_SIZE) / 2, part.top + BTN_MARGIN);
-    } else if (button) {
-      button.style.display = 'none';
+      placeBar((part.left + part.right - BAR_WIDTH) / 2, part.top + BTN_MARGIN);
+    } else if (bar) {
+      bar.style.display = 'none';
     }
   }
 

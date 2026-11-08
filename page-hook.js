@@ -1,6 +1,6 @@
 // Runs inside the page itself (world: MAIN) so it can read the responses X receives.
 // Video URLs only appear there: on the page, the <video> is a segmented blob: that
-// cannot be downloaded.
+// cannot be downloaded. It also removes the tracking X adds to the links it copies.
 (() => {
   'use strict';
 
@@ -71,6 +71,60 @@
     const media = findMedia(data);
     if (media.length) window.postMessage({ source: 'tg-media', media }, location.origin);
   }
+
+  // ---------- Links without tracking ----------
+
+  // X adds ?s= (the device) and a= or t= (who shared it) to the post links it copies.
+  const TRACKING_PARAMS = ['s', 't', 'a'];
+  const X_LINK = /https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^\s"'<>]+/g;
+
+  function cleanLinks(text) {
+    if (typeof text !== 'string') return text;
+    let cleaned = false;
+    const result = text.replace(X_LINK, (link) => {
+      let url;
+      try {
+        url = new URL(link);
+      } catch {
+        return link;
+      }
+      if (!/\/status\/\d+/.test(url.pathname)) return link;
+      const before = url.href;
+      for (const param of TRACKING_PARAMS) url.searchParams.delete(param);
+      if (url.href === before) return link;
+      cleaned = true;
+      return url.href;
+    });
+    if (cleaned) window.postMessage({ source: 'tg-link-cleaned' }, location.origin);
+    return result;
+  }
+
+  // The share menu's "Copy link" selects the link on the page and copies the selection.
+  addEventListener(
+    'copy',
+    (e) => {
+      const selected = String(getSelection());
+      const cleaned = cleanLinks(selected);
+      if (cleaned === selected || !e.clipboardData) return;
+      e.clipboardData.setData('text/plain', cleaned);
+      e.preventDefault();
+    },
+    true,
+  );
+
+  // Other ways of copying it, in case X changes how it does it.
+  const originalSetData = DataTransfer.prototype.setData;
+  DataTransfer.prototype.setData = function (format, data) {
+    return originalSetData.call(this, format, cleanLinks(data));
+  };
+  if (window.Clipboard?.prototype.writeText) {
+    const originalWriteText = Clipboard.prototype.writeText;
+    Clipboard.prototype.writeText = function (text) {
+      return originalWriteText.call(this, cleanLinks(text));
+    };
+  }
+
+  // ---------- Reading X's responses ----------
 
   const originalFetch = window.fetch;
   window.fetch = async function (...args) {
