@@ -45,6 +45,10 @@ The extension only runs on `x.com` and `twitter.com` and only asks for the `down
 
 It relies on X's current page structure and private web API, so it can stop working whenever X changes them.
 
+## License
+
+[MIT](LICENSE). Bug reports and suggestions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Disclaimer
 
 This is an unofficial personal project, not affiliated with or endorsed by X Corp. Only download content you have the right to save, and respect other people's rights and X's terms.

@@ -1,0 +1,11 @@
+name: Feature request
+description: Suggest something Tweet Grabber could do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe what you want to do and why.
+    validations:
+      required: true

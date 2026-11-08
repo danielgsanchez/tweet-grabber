@@ -5,7 +5,7 @@ Add-Type -AssemblyName System.IO.Compression
 
 $root = Split-Path $PSScriptRoot -Parent
 $files = @(
-  'manifest.json', 'background.js', 'content.js', 'content.css', 'filename.js', 'page-hook.js',
+  'LICENSE', 'manifest.json', 'background.js', 'content.js', 'content.css', 'filename.js', 'page-hook.js',
   'popup.html', 'popup.css', 'popup.js',
   'icons/icon16.png', 'icons/icon32.png', 'icons/icon48.png', 'icons/icon128.png'
 )

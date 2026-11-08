@@ -4,6 +4,7 @@
 // @version      0.1.0
 // @description  Download the photo, video or GIF you are viewing on X (Twitter) in its best quality.
 // @author       danielgsanchez
+// @license      MIT
 // @homepageURL  https://github.com/danielgsanchez/tweet-grabber
 // @supportURL   https://github.com/danielgsanchez/tweet-grabber/issues
 // @updateURL    https://raw.githubusercontent.com/danielgsanchez/tweet-grabber/main/tweet-grabber.user.js

@@ -1,0 +1,53 @@
+name: Bug report
+description: Something doesn't download, or the button doesn't appear.
+labels: [bug]
+body:
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you use Tweet Grabber?
+      options:
+        - Extension
+        - Userscript
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Tweet Grabber version
+      description: Shown in chrome://extensions or in your script manager.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and script manager
+      placeholder: Chrome 140, Tampermonkey 5.4
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it fail?
+      options:
+        - Timeline
+        - Post page
+        - Photo viewer
+        - Profile
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens?
+      description: What you did, what you expected, and what happened instead. Include any message shown at the bottom of the page.
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Errors in the console (optional)
+      description: Press F12, open the Console tab and copy any red errors.
+      render: text

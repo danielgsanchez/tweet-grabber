@@ -4,6 +4,7 @@
 // @version      {{VERSION}}
 // @description  {{DESCRIPTION}}
 // @author       danielgsanchez
+// @license      MIT
 // @homepageURL  https://github.com/danielgsanchez/tweet-grabber
 // @supportURL   https://github.com/danielgsanchez/tweet-grabber/issues
 // @updateURL    https://raw.githubusercontent.com/danielgsanchez/tweet-grabber/main/tweet-grabber.user.js
